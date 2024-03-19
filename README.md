@@ -5,4 +5,6 @@ This exploration is based on the awesome [nanoGPT](https://github.com/karpathy/n
 # Wave Function Collapse
 Wave Function Collapse (WFC) is an idea I have for how to build langauge models using Transformers.  It takes inspiration from a loose analogy to Quantum Mechanics, however it's not required that you understand QM to understand how WFC works. 
 
-The goal of WFC is to be used for generative AI, similar to popular LLMs such as ChatGPT. The concept isn't specific to text, however text is a familar way to validate it.  The WFC approach is a bit different from your typical decoder-only LLM in terms of architecture, training, inference, and loss, but it's compatible with the same training sets and makes use of standard Transformer blocks.
+The goal of WFC is to be used for generative AI, similar to popular transformer based models such as ChatGPT. The concept isn't specific to text LLMs, however text is a familar and a relatively low cost way to validate it.  
+
+The WFC approach is a bit different from your typical decoder-only LLM in terms of architecture, training, inference, and loss, but it's compatible with the same training sets and makes use of standard Transformer blocks.
