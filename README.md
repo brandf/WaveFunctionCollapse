@@ -9,4 +9,7 @@ The goal of WFC is to be used for generative AI, similar to popular transformer 
 
 The WFC approach is a bit different from your typical decoder-only LLM in terms of architecture, training, inference, and loss, but it's compatible with the same training sets and makes use of standard Transformer blocks.  Before we get into the details of this idea, let's do a quick review of a typical decoder-only LLM model:
 
+![decoder LLM diagram](assets/decoderLLM_diagram.png)
 
+
+![wfc diagram](assets/wavefunctioncollapse_diagram.png)
