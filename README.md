@@ -200,9 +200,18 @@ The encoding spaces remain the same, only we can see the autorecursion is done i
 
 Let's now take a look at our toy-example embedding space and see with the context window looks like for WFC:
 ![wcf diagram](assets/wfc_autoencoding.png)
+
 * This is the output of the Entropy Reduction step for the same example input (ABC)
 * Note that the path contains multiple grey arrows, this is the speculated 'future' segement
-  - they converge towards a pixel area in embedding space
+  - they converge towards a grey pixel area in embedding space (high entropy superposition of tokens)
+* The blue arrows indicate the 'collapse'.
+  - Note that they aren't collapsing to the same points as the token embeddings (A, B, C), but rather to the nearest point that decodes to the same distribution (within a threshold)
+  - This is intended to preserve some nuance in embedding space, while still collapsing to a determiate token
+* The black arrows also don't have to go to target the token points exactly.  
+  - Anywhere in the one-hot region will output the same token
+  - Iterating in embedding space may give the network more freedom to store information in the different points that map to that token.
+  - For example, look at the start of the path near A.  Initially that point started at A, however the network was better able to minimize entropy by drifting to its present location (still decodes to A)
+
 ## Quantum Mechanics Analogy
 
 The analogy here isn't meant to be too literal, but I find it useful to explicitly state correspondances because doing so often leads to new ideas/insights.
