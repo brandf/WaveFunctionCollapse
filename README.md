@@ -122,7 +122,7 @@ The goal of the transformer stack is to transform from each point on the path to
   - For the gray arrow, it's saying 'typically the next word would be B, but sometimes its G or B
   - 
 
-As the network learns end-to-end the 'lava' and the 'path' are trying to settle into the configuration that leads to the best accuracy on our training set.
+As the network learns end-to-end the 'lava' and the 'paths' are trying to settle into the configuration that leads to the best accuracy on our training set.
 
 ## How might we improve upon this?
 First of all, let's set some stakes in the ground.  I don't want to change the 4 spaces above, or make changes to the way Transformers work.  These are too established/proven and I would like to leverage future research/industry improvements.  
@@ -222,7 +222,7 @@ The analogy here isn't meant to be too literal, but I find it useful to explicit
 | Token                          | Quantum State                 | discrete values that can be observed
 | Logits / Probs                 | Superposition of States       | Uncertainty between one or more states
 | Embedding / Context Window     | Wave Function                 | How the uncertainty is encoded
-| Sampling                       | Measurement / Collapse        | The transition from uncertain -> certain mints
+| Sampling                       | Measurement / Collapse        | The transition from uncertain -> certain mints the past
 | Attention                      | Entanglement / Coherence      | Interdependencies between multiple particles
 | Softmax                        | Uncertainty Principle         | The more certain you are of one state, the less you are of another
 | Context Window                 | Spacetime                     | Context can represent temporal and/or spatial sequences depending on modality
