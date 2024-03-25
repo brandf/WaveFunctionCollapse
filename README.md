@@ -28,7 +28,7 @@ I'll assume you're already familiar with LLMs, and just point out a few relevant
   + while this looks horribly inefficient, if you add a KV cache, then most of the work done by the transformer blocks is reused across autoregression steps.
 
 If we zoom out from the details a bit we see that there are 4 'encoding spaces' that represent our input data, as well as several transformations between them:
-![decoder LLM diagram](assets/decoderLLM_spaces.png)
+![decoder LLM spaces](assets/decoderLLM_spaces.png)
 
 During inference, we loop through these states in a clockwise fashion
 - Starting with text
@@ -51,15 +51,15 @@ It's important to recognize a few things:
     * Token Space: discrete sequence (integers) good for training storage and as a first step towards capturing patterns in the language (common text sequences become single tokens)
       - [0, 212, 43, 9192, 156, 21, 1882, 500]
     * Probability Space: useful for loss functions.  More expressive than tokens because they can represent both discrete tokens in our vocabulary (one hot encoded) as well as distributions of multiple tokens that can be sampled to pick a discrete token.  However each token is represented by many dimensions (vocabulary size), so this is more of an intermediate representation.
-      - ![wfc diagram](assets/probability_space.png)
+      - ![probability space](assets/probability_space.png)
     * Embedding Space: more compressed and semantically meaningful than Probability Space.  This is where all of the work of the Transformers is done.
-      - ![wfc diagram](assets/embedding_space.png)
+      - ![embedding space](assets/embedding_space.png)
 
 To really understand what a transformer is doing we need to understand how embedding works because that's where all of the learnable transformations take place (blue labels in the space diagram above).
 
 For a toy example, let's use a two dimensional embedding space with a vocabulary size of 3.  This is convenient because we can visualize all three spaces in one RGB image. 
 
-![wfc diagram](assets/embedding_vocab.png)
+![embedding vocabulary](assets/embedding_vocab.png)
 
 * The X/Y coordinates of a pixel in the image represent the embeddings 
   - note that we can interpolate between two points to find a path between tokens
@@ -68,6 +68,7 @@ For a toy example, let's use a two dimensional embedding space with a vocabulary
   - note the lossiness in going from embedding -> probability -> token
   - tokens maps to a single points (A, B, or C) in embedding space
   - going in the other direction, whole regions/subspaces can map to the same token (effectively one-hot distributions)
+  - ![min entropy](assets/one_hot.png)
 * RGB pixel colors illustrate probability space
   - for the certain tokens/one-hot distributions these are pure red, green, blue pixels
   - for the uncertain embeddings they are a superposition of the color primaries (red, green, blue)
@@ -75,7 +76,8 @@ For a toy example, let's use a two dimensional embedding space with a vocabulary
 Now let's consider what happens when we train different parts of the network.  The two trainable sub-networks are the embedding/disembedding transform and the transformer stack, these are typically trained together (end to end), however for illustrative purposes let's look at the effect of training them independently.
 
 If we just train the embedding/disembedding transform:
-![wfc diagram](assets/embedding_vocab2.png)
+
+![trained embedding](assets/embedding_vocab2.png)
 
 * The shape of the regions has changed a bit like a lava lamp
   - at the start of training, it's like you shook up the lava lamp (random initialization)
@@ -87,30 +89,32 @@ If we just train the embedding/disembedding transform:
 
 Now let's consider a couple points in embedding space that don't correspond to the tokens:
 
-![wfc diagram](assets/embedding_superposition.png)
+![embedding superposition](assets/embedding_superposition.png)
 
 * Points D and E are in between the primary color regions
   - They are a superposition of multiple primary colors (aka tokens)
   - Point E is mostly Red, some Blue, and a little Green
   - Point D is gray'ish, about even Red, Blue, and Green - this represents a very uncertain distribution
+  - ![max entropy](assets/max_entropy.png)
 * We could palettized this RGB image down to just the primary colors
   - one way to do that would be to sample a primary color by treating the RGB as a probability distribution
   - this would have the effect of 'quantizing' D and E to one of the token points (A, B, or C)
   - that is exactly what happens at each autoregressive step in the decoder-only LLM (a lossy transformation)
 
+
 Here is a visualization of the effect of stochastically sampling (transformations from embedding -> token).  You can see if you squint your eyes, it approximates the gradients above, but only using the 3 primary colors (tokens):
 
-![wfc diagram](assets/embedding_palette.png)
+![embedding palette](assets/embedding_palette.png)
 
 Now let's freeze the embedding space, and look at the Transformer stack, which performs next embedding prediction.
-![wfc diagram](assets/embedding_context.png)
+![embedding context](assets/embedding_context.png)
 
 * You can think of the context window as a path connecting points corresponding to tokens
   - In this example, the context window contains ABC
 
 The goal of the transformer stack is to transform from each point on the path to the next point on the path, and extrapolate one further point in the future.
 
-![wfc diagram](assets/decoderLLM_next_token_path.png)
+![decoderLLM next token path](assets/decoderLLM_next_token_path.png)
 
 * The black arrows show how it's learned to transform between points, and the gray arrow shows the extrapolated next embedding prediction
   - Note that they don't end up exactly at the ideal token points
@@ -144,8 +148,7 @@ Before I get into the details of the analogy let's look at some things in the mo
     - Speculating multiple future tokens is expensive in this model because of the butterfly effect.
     - This limits our opportunity for reasoning (steering towards preferred futures)
     - If we could speculate even with low confidence, it could potentially improve accuracy.
-
-![many worlds](assets/many_worlds.png)
+    - ![many worlds](assets/many_worlds.png)
 
 ## Understanding Wave Function Collapse
 Now let's take a look at the diagram for Wave Function Collapse, and then I'll discuss how it incorporates these opportunities, and I'll explain some of the insights that led to it.
@@ -158,10 +161,11 @@ Overall this should look familiar - the goal is to make minor changes after all.
     - The "Future" segment represents a linear sequence (not tree) of speculated future embeddings.
       + Initialized to embedding from a max-entropy probability distribution (anything is possible)
     - Note that we aren't speculating autoregressively. The speculation is computed in parallel.
+    - ![probabilisitc speculation](assets/probabilistic_speculation.png)
 1. Rather than the Transformer Blocks predicting the next token, they are simply auto-encoding
     - Like an encoder-style Masked Language Model (MLM), only we're going to generate text autoregressively from it.
     - It learns to minimize the entropy (uncertainty) in the input tokens
-    - It shouldn't collapse because it's trained via disembedding on the zero-entropy one-hot encodings rather than explicitly minimizing entropy
+    - It's trained via disembedding on the zero-entropy one-hot encodings rather than explicitly minimizing entropy
     - The output is the same as input for past tokens, but for future tokens it squeezes as much entropy out as it can, giving a sequence that represents the probability distributions of the future timesteps.
 1. We don't have to use a causal mask, however it is compatible with one to limit speculation distance.
     - it is desirable that past and future embeddings attend to each other, we can alway pad with more/less future embeddings depending on runtime conditions
@@ -173,6 +177,9 @@ Overall this should look familiar - the goal is to make minor changes after all.
     - This bares some resemblance to stable diffusion as well
     - A recent paper about Loop Transformers did this with a single block transformer, however I'm imagining it to be more than one.
     - Since we switched to an entropy-minimizing autoencoder, it means it's easy for an iterative solver to detect when it's converged (zero velocity/change) and early exit.  Now the cost can be proportional to the complexity of the problem, or even the available compute / latency requirements.
+
+
+Rather than trying to speculate by computing a tree of possible definite futures, which is very expensive, we are going to use a single list of uncertain speculated embeddings.  You can think of these as the average of each layer of the tree, however we are going to directly predict them.  This will hopefully allow the attention to work across past and future, while preserving the uncertain nature of future events.
 
 The outputs of the Transformer Blocks are initially handled similar to the decoder-LLM, during training loss is injected into each output via the disembedding projection, during inference things are a little different.
 
@@ -247,11 +254,14 @@ Notice that we're giving up some of the context window for the speculated future
 When we collapse a future embedding, we're sort of forcing a point on this graph down to zero.  The rest of the graph then re-converges to minimal entropy, which will have the effect of pushing the uncertainty 'hockey stick' over to the right (future).  I think of this like squeezing toothpaste out of a tube, or the wave of time moving into the future.
 
 
-![wfc lagrangian](assets/wfc_lagrangian.png)
-
-In quantum mechanics, there is a concept called Lagrangian Mechanics that relates to the principle of least action.  Reversing the analogy can lead to new ideas related to the LLM idea.  For example, what if instead of collapsing the next token, we use some policy model to collapse something in the middle of the future segment?  The entropy-minimizing transformer would converge towards a state that tries to fill in the tokens to get you to this state.  This could allow for a more efficient binary search over possible futures to help with reasoning.
-
-
 ![wfc partial](assets/wfc_partial.png)
 
-This leads to another idea of only partially collapsing some future token.  You could imagine several iterations of holding a partial collapse followed by converging on a new minimal entropy.  This could be a way to extend out the time horizon for speculation for some plausible future.
+Normally we would fully collapse the next (first future) embedding, but we can also collapse more future embeddings, or even partially collapse embeddings.  You could imagine several iterations of holding a partial collapse followed by converging on a new minimal entropy.  This could be a way to extend out the time horizon for speculation for some plausible future.
+
+![wfc lagrangian](assets/wfc_lagrangian.png)
+
+In quantum mechanics, there is a concept called Lagrangian Mechanics that relates to the principle of least action.  Reversing the analogy can lead to new ideas related to the LLM idea.  For example, what if instead of collapsing the next token, we use some policy model to collapse something in the middle of the future segment?  The entropy-minimizing transformer would converge towards a state that tries to fill in the tokens to get you to this state.  This could allow for a more efficient search over possible futures to help with reasoning.
+
+![wfc multiple lagrangian](assets/wfc_multiple_lagrangian.png)
+
+At this point you might be wondering, how do we know what to collapse?
