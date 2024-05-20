@@ -11,9 +11,12 @@ import math
 import inspect
 from dataclasses import dataclass
 
+import os
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+import numpy as np
+import matplotlib.pyplot as plt
 
 class LayerNorm(nn.Module):
     """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
@@ -115,6 +118,36 @@ class GPTConfig:
     dropout: float = 0.0
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
 
+class UncertainEmbedding(nn.Module):
+    def __init__(self, vocab_size, n_embd, weight, min_certainty = 0.75, noise_percent = 0.5):
+        super(UncertainEmbedding, self).__init__()
+        self.embedding = nn.Embedding(vocab_size, n_embd)
+        self.weight = nn.Parameter(weight)
+        self.embedding.weight = weight
+        self.vocab_size = vocab_size
+        self.min_certainty = min_certainty
+        self.noise_percent = noise_percent
+
+    def forward(self, idx):
+        # Apply softmax to logits to get probabilities
+        if self.training:
+            # randomize how certain we are in this token so that it will be robust to different degrees of certainty (include fully certain)
+            effective_certainty = torch.rand(1).item() * (1.0 - self.min_certainty) + self.min_certainty
+            uncertain_one_hot = F.one_hot(idx, num_classes=self.vocab_size).float() * effective_certainty
+
+            # remaining uncertainty is spread across the vocabulary
+            remaining_uncertainty = (1.0 - effective_certainty) / uncertain_one_hot.size(-1)
+            stddev = remaining_uncertainty * self.noise_percent
+            noise = torch.normal(remaining_uncertainty, stddev, size=uncertain_one_hot.shape, device=uncertain_one_hot.device)
+
+            probs = uncertain_one_hot + noise
+            probs = F.normalize(torch.abs(probs), dim=-1)
+
+            embeddings = torch.matmul(probs, self.embedding.weight)
+        else:
+            embeddings = self.embedding(idx)
+        return embeddings
+
 class GPT(nn.Module):
 
     def __init__(self, config):
@@ -123,19 +156,14 @@ class GPT(nn.Module):
         assert config.block_size is not None
         self.config = config
 
+        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.transformer = nn.ModuleDict(dict(
-            wte = nn.Embedding(config.vocab_size, config.n_embd),
+            wte = UncertainEmbedding(config.vocab_size, config.n_embd, self.lm_head.weight),
             wpe = nn.Embedding(config.block_size, config.n_embd),
             drop = nn.Dropout(config.dropout),
             h = nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
             ln_f = LayerNorm(config.n_embd, bias=config.bias),
         ))
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-        # with weight tying when using torch.compile() some warnings get generated:
-        # "UserWarning: functional_call was passed multiple values for tied weights.
-        # This behavior is deprecated and will be an error in future versions"
-        # not 100% sure what this is, so far seems to be harmless. TODO investigate
-        self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
 
         # init all weights
         self.apply(self._init_weights)
@@ -179,6 +207,7 @@ class GPT(nn.Module):
         x = self.transformer.drop(tok_emb + pos_emb)
         for block in self.transformer.h:
             x = block(x)
+
         x = self.transformer.ln_f(x)
 
         if targets is not None:
@@ -316,15 +345,55 @@ class GPT(nn.Module):
             logits, _ = self(idx_cond)
             # pluck the logits at the final step and scale by desired temperature
             logits = logits[:, -1, :] / temperature
+
+
             # optionally crop the logits to only the top k options
             if top_k is not None:
                 v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
                 logits[logits < v[:, [-1]]] = -float('Inf')
+
             # apply softmax to convert logits to (normalized) probabilities
             probs = F.softmax(logits, dim=-1)
+            entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1)
+            options = torch.exp(entropy)
+
             # sample from the distribution
             idx_next = torch.multinomial(probs, num_samples=1)
+
+            
+            print('idx:', idx_next.item(), 'Effective Options:', options.item(), 'Max P', torch.max(probs).item())
+            plot_probabilities(probs, f'out/images/{idx_next.item()}.png')
+
+
             # append sampled index to the running sequence and continue
             idx = torch.cat((idx, idx_next), dim=1)
 
         return idx
+
+def plot_probabilities(probs, output_image_path, image_width=2000, image_height=400):
+    ensure_dir_exists(output_image_path)
+    vocab_size = probs.size(-1)
+    probs = probs.view(-1).cpu().detach().numpy()
+
+    # Aggregate probabilities for each bar
+    bar_width = vocab_size // image_width
+    print(bar_width)
+    print(vocab_size)
+    print(image_width)
+    aggregated_probs = [np.max(probs[i*bar_width:min((i+1)*bar_width, vocab_size-1)]) for i in range(image_width)]
+
+    # Plotting
+    plt.figure(figsize=(image_width/10, image_height/10))
+    plt.bar(range(image_width), aggregated_probs, width=0.8, edgecolor='none', color='skyblue')
+    plt.xlabel('Token Group')
+    plt.ylabel('Max Probability')
+    plt.title('Token Probability Distribution (Max within each group)')
+
+    # Save the plot as an image
+    plt.savefig(output_image_path, bbox_inches='tight', dpi=10)
+    plt.close()
+
+def ensure_dir_exists(file_path):
+    directory = os.path.dirname(file_path)
+    if not os.path.exists(directory):
+        os.makedirs(directory)
